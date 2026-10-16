@@ -15,6 +15,8 @@ function readAppVersion(): string {
 }
 
 const nextConfig: NextConfig = {
+  // Keep standalone paths independent of lockfiles elsewhere on the build machine.
+  outputFileTracingRoot: process.cwd(),
   // standalone 输出仅供 Docker 镜像构建使用（DOCKER_BUILD=1）；
   // 本地 next start 在 standalone 模式下不受支持，故按环境切换
   output: process.env.DOCKER_BUILD === '1' ? 'standalone' : undefined,

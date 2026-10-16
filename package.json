@@ -10,7 +10,15 @@
     "start": "next start -p 8080",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "desktop:build": "node scripts/build-desktop.cjs",
+    "desktop:icons": "node scripts/prepare-icons.cjs",
+    "desktop:start": "electron desktop",
+    "desktop:test": "node --test desktop/*.test.cjs",
+    "desktop:smoke": "node scripts/smoke-desktop.cjs",
+    "desktop:pack": "electron-builder --config electron-builder.yml",
+    "desktop:mac": "npm run desktop:build && npm run desktop:icons && npm run desktop:pack -- --mac",
+    "desktop:win": "npm run desktop:build && npm run desktop:icons && npm run desktop:pack -- --win --x64"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.59.0",
@@ -27,13 +35,17 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.1",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "autoprefixer": "^10.4.20",
+    "electron": "44.8.0",
+    "electron-builder": "26.15.3",
     "eslint": "^9.39.4",
     "eslint-config-next": "^15.5.25",
     "postcss": "^8.4.49",
+    "sharp": "0.34.5",
     "tailwindcss": "^3.4.15",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

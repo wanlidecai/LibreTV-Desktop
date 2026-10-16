@@ -1,0 +1,10 @@
+{
+  "name": "libretv-desktop",
+  "version": "1.0.0",
+  "description": "LibreTV 桌面版，内置本地服务，双击即可启动",
+  "main": "main.cjs",
+  "author": "wanlidecai and LibreTV contributors",
+  "license": "AGPL-3.0-or-later",
+  "homepage": "https://github.com/wanlidecai/LibreTV-Desktop",
+  "repository": { "type": "git", "url": "https://github.com/wanlidecai/LibreTV-Desktop.git" }
+}

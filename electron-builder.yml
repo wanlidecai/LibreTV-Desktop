@@ -1,0 +1,67 @@
+appId: io.github.wanlidecai.libretv
+productName: LibreTV Desktop
+copyright: Copyright © LibreTV contributors and wanlidecai
+directories:
+  app: desktop
+  buildResources: build-desktop
+  output: dist-desktop
+asar: true
+npmRebuild: false
+files:
+  - '**/*.cjs'
+  - '*.html'
+  - package.json
+  - '!**/*.test.cjs'
+extraResources:
+  - from: .desktop-server
+    to: server
+    filter:
+      - '**/*'
+      - '!**/.env'
+      - '!**/.env.*'
+  - from: build-desktop/icons/icon.png
+    to: icon.png
+  - from: LICENSE
+    to: LICENSE
+publish: null
+artifactName: LibreTV-Desktop-${version}-${os}-${arch}.${ext}
+mac:
+  category: public.app-category.entertainment
+  icon: build-desktop/icons/icon.icns
+  identity: '-'
+  notarize: false
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+dmg:
+  title: LibreTV Desktop ${version}
+  sign: false
+  contents:
+    - x: 140
+      y: 180
+      type: file
+    - x: 400
+      y: 180
+      type: link
+      path: /Applications
+win:
+  icon: build-desktop/icons/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+nsis:
+  artifactName: LibreTV-Desktop-${version}-windows-${arch}-Setup.${ext}
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: LibreTV Desktop
+  deleteAppDataOnUninstall: false
+  license: LICENSE
+portable:
+  artifactName: LibreTV-Desktop-${version}-windows-${arch}-Portable.${ext}

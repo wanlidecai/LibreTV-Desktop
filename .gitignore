@@ -12,3 +12,8 @@ vitest-results.json
 .zcode/
 .codebuddy/
 generated-images/
+# Desktop build output
+.desktop-server/
+dist-desktop/
+build-desktop/
+artifacts/
