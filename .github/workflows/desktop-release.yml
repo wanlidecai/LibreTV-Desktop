@@ -1,0 +1,157 @@
+name: Desktop build and release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    tags: ['desktop-v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            runner: windows-2022
+            platform: win
+            arch: x64
+          - name: macOS Apple Silicon
+            runner: macos-15
+            platform: mac
+            arch: arm64
+          - name: macOS Intel
+            runner: macos-15-intel
+            platform: mac
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      NEXT_TELEMETRY_DISABLED: '1'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.1
+          cache: npm
+      - name: Check tag version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          node -e 'const v=require("./desktop/package.json").version; if(process.env.GITHUB_REF_NAME!==`desktop-v${v}`) throw new Error("Release tag must match desktop/package.json version");'
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Run application tests
+        run: npm test
+      - name: Run desktop tests
+        run: npm run desktop:test
+      - name: Build embedded server
+        run: npm run desktop:build
+      - name: Type-check application
+        run: npm run typecheck
+      - name: Prepare desktop icons
+        run: npm run desktop:icons
+      - name: Package application
+        run: npm run desktop:pack -- --${{ matrix.platform }} --${{ matrix.arch }} --publish never
+      - name: Smoke-test packaged desktop
+        run: node scripts/smoke-packaged.cjs
+      - name: Upload smoke-test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: smoke-${{ matrix.platform }}-${{ matrix.arch }}
+          path: artifacts/
+          if-no-files-found: ignore
+      - name: Upload installers
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: desktop-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            dist-desktop/*.exe
+            dist-desktop/*.dmg
+            dist-desktop/*.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  release:
+    name: Publish all desktop downloads
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Download all installers
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: desktop-*
+          path: release
+          merge-multiple: true
+      - name: Verify complete release and calculate SHA-256
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const version = require('./desktop/package.json').version;
+          const expected = [
+            `LibreTV-Desktop-${version}-windows-x64-Setup.exe`,
+            `LibreTV-Desktop-${version}-windows-x64-Portable.exe`,
+            ...['arm64', 'x64'].flatMap(arch => ['dmg', 'zip'].map(ext => `LibreTV-Desktop-${version}-mac-${arch}.${ext}`)),
+          ];
+          for (const name of expected) {
+            if (!fs.existsSync(`release/${name}`) || fs.statSync(`release/${name}`).size === 0) {
+              throw new Error(`Missing release asset: ${name}`);
+            }
+          }
+          NODE
+          cd release
+          sha256sum LibreTV-Desktop-* > SHA256SUMS.txt
+      - name: Prepare release notes
+        shell: bash
+        run: |
+          cat > release-notes.md <<'NOTES'
+          ## 下载与安装
+
+          - **Windows 10 / 11（64 位）**：下载 `windows-x64-Setup.exe` 安装，或下载 `windows-x64-Portable.exe` 双击运行。
+          - **Mac Apple 芯片**：下载 `mac-arm64.dmg`，打开后把应用拖入 Applications。
+          - **Mac Intel 芯片**：下载 `mac-x64.dmg`，打开后把应用拖入 Applications。
+          - Mac 也提供 ZIP 压缩包。应用自带运行环境，无需安装 Node.js 或 Docker。
+
+          当前为社区构建，未购买 Windows 代码签名证书，也未通过 Apple 公证。首次启动可能出现系统安全提示；请核对下载来源和 SHA256SUMS.txt 后按系统提示允许打开。
+
+          软件本地启动，搜索与播放仍需要网络和可用的视频来源。所有版本均由本标签对应的公开源码构建，遵循 AGPL-3.0-or-later。GitHub 下方的 Source code 提供对应源码，构建步骤见仓库 README。
+          NOTES
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release/* --verify-tag --draft --title "LibreTV Desktop ${GITHUB_REF_NAME#desktop-v}" --notes-file release-notes.md
+          fi
+          gh release edit "$GITHUB_REF_NAME" --draft=false --notes-file release-notes.md
