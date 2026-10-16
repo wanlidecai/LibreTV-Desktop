@@ -7,11 +7,13 @@ directories:
   output: dist-desktop
 asar: true
 npmRebuild: false
+afterPack: scripts/after-pack.cjs
 files:
   - '**/*.cjs'
   - '*.html'
   - package.json
   - '!**/*.test.cjs'
+  - '!node_modules/**/*'
 extraResources:
   - from: .desktop-server
     to: server
@@ -19,6 +21,10 @@ extraResources:
       - '**/*'
       - '!**/.env'
       - '!**/.env.*'
+  # electron-builder excludes a root node_modules directory from generic copies.
+  - from: .desktop-server/node_modules
+    to: server/node_modules
+    filter: ['**/*']
   - from: build-desktop/icons/icon.png
     to: icon.png
   - from: LICENSE
