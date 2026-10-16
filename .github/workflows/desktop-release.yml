@@ -139,7 +139,7 @@ jobs:
           - **Mac Intel 芯片**：下载 `mac-x64.dmg`，打开后把应用拖入 Applications。
           - Mac 也提供 ZIP 压缩包。应用自带运行环境，无需安装 Node.js 或 Docker。
 
-          当前为社区构建，未购买 Windows 代码签名证书，也未通过 Apple 公证。首次启动可能出现系统安全提示；请核对下载来源和 SHA256SUMS.txt 后按系统提示允许打开。
+          当前为社区构建，Windows 未进行代码签名；macOS 使用本地临时签名，未使用 Developer ID 证书，也未通过 Apple 公证。首次启动可能出现系统安全提示；请核对下载来源和 SHA256SUMS.txt 后按系统提示允许打开。
 
           软件本地启动，搜索与播放仍需要网络和可用的视频来源。所有版本均由本标签对应的公开源码构建，遵循 AGPL-3.0-or-later。GitHub 下方的 Source code 提供对应源码，构建步骤见仓库 README。
           NOTES
