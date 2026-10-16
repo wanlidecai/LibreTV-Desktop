@@ -37,10 +37,8 @@ mac:
   identity: '-'
   notarize: false
   target:
-    - target: dmg
-      arch: [arm64, x64]
-    - target: zip
-      arch: [arm64, x64]
+    - dmg
+    - zip
 dmg:
   title: LibreTV Desktop ${version}
   sign: false
@@ -55,10 +53,8 @@ dmg:
 win:
   icon: build-desktop/icons/icon.ico
   target:
-    - target: nsis
-      arch: [x64]
-    - target: portable
-      arch: [x64]
+    - nsis
+    - portable
 nsis:
   artifactName: LibreTV-Desktop-${version}-windows-${arch}-Setup.${ext}
   oneClick: false
