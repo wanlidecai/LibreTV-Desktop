@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu, dialog, shell, utilityProcess, session } = req
 const fs = require('node:fs');
 const path = require('node:path');
 const { loadSettings, prepareRuntime, isAppURL, isExternalURL } = require('./runtime.cjs');
+const { bundledSources } = require('./bundled-sources.cjs');
 
 const REPOSITORY = 'https://github.com/wanlidecai/LibreTV-Desktop';
 app.setName('LibreTV');
@@ -82,7 +83,8 @@ function createWindow() {
 function launchServer(dir, settings) {
   return new Promise((resolve, reject) => {
     const env = { ...process.env, NODE_ENV: 'production', PORT: String(settings.port), HOSTNAME: '127.0.0.1', PASSWORD: settings.password,
-      PROXY_SECRET: settings.password, COOKIE_SECURE: 'false', NEXT_TELEMETRY_DISABLED: '1' };
+      PROXY_SECRET: settings.password, COOKIE_SECURE: 'false', NEXT_TELEMETRY_DISABLED: '1',
+      DEFAULT_SOURCES: JSON.stringify(bundledSources) };
     delete env.NODE_OPTIONS;
     delete env.NODE_PATH;
     delete env.ELECTRON_RUN_AS_NODE;

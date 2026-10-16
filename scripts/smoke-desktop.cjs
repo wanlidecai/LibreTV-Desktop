@@ -6,11 +6,19 @@ const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 const { randomUUID } = require('node:crypto');
+const { bundledSources, sourceProvenance } = require('../desktop/bundled-sources.cjs');
 
 const root = path.resolve(__dirname, '..');
 const timeout = process.platform === 'win32' ? 180_000 : 120_000;
 const artifacts = path.join(root, 'artifacts', `desktop-smoke-${process.platform}-${process.arch}`);
 const marker = randomUUID();
+const expectedSources = bundledSources.map((source, index) => ({
+  key: `env_${index}`,
+  name: source.name.trim(),
+  url: source.url.trim().replace(/\/+$/, ''),
+  ...(source.detail?.trim() ? { detail: source.detail.trim() } : {}),
+  isAdult: false,
+}));
 let userData;
 let current;
 let page;
@@ -46,13 +54,27 @@ async function launch() {
   const context = current.context();
   context.setDefaultTimeout(30_000);
   context.setDefaultNavigationTimeout(timeout);
-  // Exercise the real local server/auth; recommendation providers are fixtures.
+  // Exercise the real local server/auth. Fixtures prevent external provider calls.
   await context.route('**/*', async route => {
     const url = new URL(route.request().url());
     if (url.protocol === 'file:') return route.continue();
     if (url.hostname !== '127.0.0.1') return route.abort();
     if (['/api/hot-list', '/api/douban'].includes(url.pathname)) return route.fulfill({ json: { items: [] } });
     if (url.pathname === '/api/bangumi/calendar') return route.fulfill({ json: { days: [] } });
+    if (url.pathname === '/api/search') {
+      const body = route.request().postDataJSON();
+      const sources = Array.isArray(body?.sources) ? body.sources : [];
+      const first = sources[0];
+      const list = first ? [{
+        sourceKey: first.key, sourceName: first.name, sourceUrl: first.url,
+        vodId: 'desktop-smoke', name: `桌面烟测结果 ${body.wd}`, isAdult: false,
+      }] : [];
+      const events = [
+        ...sources.map((source, index) => ({ type: 'source', sourceKey: source.key, ok: true, ms: 1, list: index === 0 ? list : [] })),
+        { type: 'done', list, failures: [] },
+      ];
+      return route.fulfill({ contentType: 'application/x-ndjson', body: `${events.map(event => JSON.stringify(event)).join('\n')}\n` });
+    }
     return route.continue();
   });
   page = await current.firstWindow({ timeout });
@@ -69,7 +91,7 @@ async function launch() {
   assert.equal(status.ok, true);
   assert.equal(status.body.passwordRequired, true);
   assert.equal(status.body.verified, true, 'Desktop must automatically authenticate the renderer');
-  assert.deepEqual(status.body.defaultSources, []);
+  assert.deepEqual(status.body.defaultSources, expectedSources, 'The real API must expose every bundled upstream source without alteration');
   assert.deepEqual(status.body.defaultLiveSources, []);
   assert.deepEqual(await page.evaluate(() => ({ require: typeof require, process: typeof process })),
     { require: 'undefined', process: 'undefined' }, 'Renderer must not expose Node.js');
@@ -79,6 +101,44 @@ async function launch() {
   });
   assert.deepEqual(preferences, { nodeIntegration: false, contextIsolation: true, sandbox: true });
   return status.body.version;
+}
+
+async function expectSelectedSources(sources) {
+  await expect.poll(() => page.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('libretv-settings') || '{}');
+    return (saved.state?.selectedKeys || []).slice().sort();
+  }), { timeout: 15_000, message: 'Selected sources must persist in the application settings' })
+    .toEqual(sources.map(source => source.key).sort());
+}
+
+async function inspectSourceSettings(selectedSources) {
+  const settings = page.getByRole('dialog', { name: '设置', exact: true });
+  await expect(settings).toBeVisible();
+  await expect(settings.getByRole('checkbox')).toHaveCount(expectedSources.length);
+  const selected = new Set(selectedSources.map(source => source.key));
+  for (const source of expectedSources) {
+    const checkbox = settings.getByRole('checkbox', { name: `选择 ${source.name}`, exact: true });
+    await expect(checkbox).toBeVisible();
+    await expect(settings.getByText(source.url, { exact: true })).toBeVisible();
+    await expect(checkbox).toBeChecked({ checked: selected.has(source.key) });
+  }
+}
+
+async function searchWithBundledSources(sources, phase) {
+  const query = `桌面源烟测 ${phase} ${marker.slice(0, 8)}`;
+  const requested = page.waitForRequest(request => {
+    return new URL(request.url()).pathname === '/api/search' && request.method() === 'POST' && request.postDataJSON()?.wd === query;
+  });
+  await page.getByRole('combobox', { name: '搜索影片', exact: true }).fill(query);
+  await page.getByRole('button', { name: '搜索', exact: true }).click();
+  const payload = (await requested).postDataJSON();
+  assert.deepEqual(payload.sources, sources, 'Search must use precisely the enabled bundled sources');
+  assert.equal(payload.filterAdult, true);
+  await expect(page.getByRole('heading', { name: `桌面烟测结果 ${query}`, exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: '搜索结果', exact: true })).toContainText('1 部影片');
+  await page.screenshot({ path: path.join(artifacts, `source-search-${phase}.png`) });
+  await page.getByRole('link', { name: 'LibreTV 首页', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'LibreTV', exact: true })).toBeVisible();
 }
 
 async function closeAndCheckServer() {
@@ -96,22 +156,31 @@ async function closeAndCheckServer() {
 }
 
 async function main() {
+  assert.ok(expectedSources.length > 0, 'Desktop must bundle the requested upstream sources');
+  assert.ok(bundledSources.every(source => source.isAdult === false), 'Bundled source metadata must explicitly mark non-adult sources');
+  assert.ok(sourceProvenance, 'Bundled upstream sources must include provenance');
   await fs.mkdir(artifacts, { recursive: true });
   userData = await fs.mkdtemp(path.join(os.tmpdir(), 'libretv-desktop-smoke-'));
   const version = await launch();
+  await expectSelectedSources(expectedSources);
   await page.screenshot({ path: path.join(artifacts, 'home.png') });
   await page.getByRole('button', { name: '设置', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: '设置', exact: true })).toBeVisible();
+  await inspectSourceSettings(expectedSources);
   await page.screenshot({ path: path.join(artifacts, 'settings.png') });
   await page.getByRole('dialog', { name: '设置', exact: true }).getByRole('button', { name: '关闭', exact: true }).click();
   await expect(page.getByRole('dialog', { name: '设置', exact: true })).toHaveCount(0);
+  await searchWithBundledSources(expectedSources, 'initial');
   await current.evaluate(({ Menu }) => {
     const menu = Menu.getApplicationMenu();
     const settings = menu.items.find(item => item.label === '文件')?.submenu?.items.find(item => item.label === '设置');
     if (!settings) throw new Error('Native Settings menu is missing');
     settings.click();
   });
-  await expect(page.getByRole('dialog', { name: '设置', exact: true })).toBeVisible();
+  await inspectSourceSettings(expectedSources);
+  const remainingSources = expectedSources.slice(1);
+  await page.getByRole('dialog', { name: '设置', exact: true }).getByRole('checkbox', { name: `选择 ${expectedSources[0].name}`, exact: true }).uncheck();
+  await inspectSourceSettings(remainingSources);
+  await expectSelectedSources(remainingSources);
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog', { name: '设置', exact: true })).toHaveCount(0);
   await page.getByRole('link', { name: '直播', exact: true }).click();
@@ -141,6 +210,13 @@ async function main() {
   }, marker);
   await closeAndCheckServer();
   await launch();
+  await expectSelectedSources(remainingSources);
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await inspectSourceSettings(remainingSources);
+  await page.screenshot({ path: path.join(artifacts, 'settings-after-restart.png') });
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: '设置', exact: true })).toHaveCount(0);
+  if (remainingSources.length) await searchWithBundledSources(remainingSources, 'restarted');
   assert.deepEqual(await page.evaluate(() => ({ marker: localStorage.getItem('desktop-smoke-marker'), theme: localStorage.getItem('libretv-theme'), dark: document.documentElement.classList.contains('dark') })),
     { marker, theme: 'light', dark: false });
   const stored = await page.evaluate(token => new Promise((resolve, reject) => {
@@ -157,7 +233,7 @@ async function main() {
   }), marker);
   assert.equal(stored, marker, 'IndexedDB history must survive a complete restart');
   await closeAndCheckServer();
-  await fs.writeFile(path.join(artifacts, 'result.json'), JSON.stringify({ passed: true, platform: process.platform, arch: process.arch, upstreamVersion: version, packaged: Boolean(process.env.LIBRETV_EXECUTABLE), checks: ['automatic authentication', 'home/settings/live', 'native settings menu', 'renderer isolation', 'localStorage persistence', 'IndexedDB persistence', 'stable local origin', 'window close stops server'] }, null, 2));
+  await fs.writeFile(path.join(artifacts, 'result.json'), JSON.stringify({ passed: true, platform: process.platform, arch: process.arch, upstreamVersion: version, packaged: Boolean(process.env.LIBRETV_EXECUTABLE), bundledSourceCount: expectedSources.length, sourceProvenance, checks: ['automatic authentication', 'complete bundled sources in real API', 'bundled sources initially enabled and visible', 'bundled sources used by search UI', 'source opt-out survives restart and search', 'home/settings/live', 'native settings menu', 'renderer isolation', 'localStorage persistence', 'IndexedDB persistence', 'stable local origin', 'window close stops server'] }, null, 2));
   console.log(`Desktop smoke passed (${process.platform}/${process.arch}); evidence: ${artifacts}`);
 }
 
